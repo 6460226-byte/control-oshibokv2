@@ -1,0 +1,652 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Система контроля ошибок • Авторизация</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Roboto+Mono:wght@400;500&display=swap');
+        body { font-family: 'Inter', system_ui, sans-serif; height: 100vh; overflow: hidden; }
+        .mono { font-family: 'Roboto Mono', monospace; }
+        .tab-active { border-bottom: 3px solid #3b82f6; color: #3b82f6; font-weight: 600; }
+        .sheet { box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1); }
+        .error-row:hover { background-color: #111114; }
+        
+        #save-status { transition: opacity 0.3s ease; opacity: 0; pointer-events: none; }
+        #save-status.visible { opacity: 1; }
+        #login-screen { position: fixed; inset: 0; background: #09090b; z-index: 100; display: flex; align-items: center; justify-content: center; }
+        
+        /* Стили для скроллбара в рейтинге */
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #18181b; border-radius: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #52525b; }
+    </style>
+</head>
+<body class="bg-zinc-950 text-zinc-200">
+
+    <div id="login-screen">
+        <div class="bg-zinc-900 p-10 rounded-3xl border border-zinc-800 w-full max-w-md shadow-2xl">
+            <div class="flex items-center gap-4 mb-8">
+                <div class="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center text-white font-bold text-3xl">🔑</div>
+                <div>
+                    <h1 class="text-3xl font-semibold tracking-tight">Вход в систему</h1>
+                    <p class="text-zinc-400 text-sm">Контроль ошибок (Без штрафов)</p>
+                </div>
+            </div>
+            
+            <div class="space-y-5">
+                <div>
+                    <label class="block text-xs text-zinc-400 mb-2">Логин (роль)</label>
+                    <input type="text" id="login-username" placeholder="например, rop или rgp1" 
+                           class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-5 py-3.5 text-sm focus:border-blue-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs text-zinc-400 mb-2">Пароль</label>
+                    <input type="password" id="login-password" placeholder="••••••••" 
+                           class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-5 py-3.5 text-sm focus:border-blue-500 outline-none"
+                           onkeypress="if(event.key === 'Enter') attemptLogin()">
+                </div>
+                <div id="login-error" class="text-red-400 text-sm hidden pt-1 text-center">❌ Неверный логин или пароль</div>
+                <button onclick="attemptLogin()" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-xl font-medium mt-4 transition-colors">Войти в систему</button>
+                <p class="text-center text-zinc-600 text-xs pt-4">Разработчик Гаврилов Д.А.</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="main-app" class="hidden h-full flex flex-col overflow-hidden">
+        <div id="save-status" class="fixed top-6 right-6 bg-blue-600 text-white px-4 py-2 rounded-2xl text-sm font-medium z-50 flex items-center gap-2">
+            <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            Синхронизация с базой...
+        </div>
+
+        <div class="bg-zinc-900 border-b border-zinc-800 px-8 py-6 flex-none">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-4">
+                    <div class="w-10 h-10 bg-zinc-800 rounded-2xl flex items-center justify-center text-white font-bold text-2xl border border-zinc-700">📋</div>
+                    <div>
+                        <h1 class="text-3xl font-semibold tracking-tight">Учет ошибок (Лог)</h1>
+                        <p id="app-subtitle" class="text-zinc-400 text-sm">Загрузка данных...</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-4">
+                    <div class="text-right">
+                        <div id="user-full-name" class="font-medium text-zinc-100">Вы вошли как</div>
+                        <div id="user-role-display" class="text-xs text-zinc-400 bg-zinc-800 px-3 py-1 rounded-full mt-1 inline-block">Загрузка...</div>
+                    </div>
+                    <button onclick="logout()" class="w-10 h-10 bg-zinc-800 hover:bg-zinc-700 rounded-full flex items-center justify-center text-zinc-400 hover:text-red-400 border border-zinc-700 transition-colors" title="Выйти">🚪</button>
+                </div>
+            </div>
+
+            <div id="main-nav" class="flex items-center gap-8 text-sm mt-6 border-t border-zinc-800 pt-6 hidden">
+                <div onclick="switchTab(1)" id="tab-1" class="tab-active cursor-pointer pb-1">📊 Таблица ошибок</div>
+                <div onclick="switchTab(2)" id="tab-2" class="cursor-pointer pb-1 hidden">📈 Аналитика</div>
+                <div onclick="switchTab(0)" id="tab-0" class="cursor-pointer pb-1 hidden">📘 Справочник стандартов</div>
+                <div onclick="switchTab(3)" id="tab-3" class="cursor-pointer pb-1 hidden text-emerald-400">⚙️ Сотрудники (МОП)</div>
+            </div>
+        </div>
+
+        <div class="flex-grow p-8 overflow-y-auto" style="height: calc(100vh - 150px);">
+            <div class="max-w-7xl mx-auto grid grid-cols-12 gap-8 pb-10">
+                
+                <div id="content-0" class="col-span-12 sheet bg-zinc-900 rounded-3xl p-8 hidden">
+                    <div class="flex justify-between items-center mb-8">
+                        <div>
+                            <h2 class="text-2xl font-semibold">📘 Справочник стандартов</h2>
+                            <p class="text-zinc-400">Список нарушений регламента. Редактировать может только РОП.</p>
+                        </div>
+                        <div class="flex gap-3">
+                            <button onclick="forceLoadDefaults()" class="add-btn bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 px-4 py-3 rounded-2xl flex items-center gap-2 text-sm font-medium hidden">
+                                🔄 Вернуть базу из регламента
+                            </button>
+                            <button onclick="addHandbookRow()" class="add-btn bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-2xl flex items-center gap-2 text-sm font-medium hidden">
+                                <span class="text-lg leading-none">+</span> Добавить стандарт
+                            </button>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="border-b border-zinc-700">
+                                    <th class="text-left py-4 px-6 font-medium text-zinc-400">Тип ошибки</th>
+                                    <th class="text-left py-4 px-6 font-medium text-zinc-400">Критичность</th>
+                                    <th class="text-left py-4 px-6 font-medium text-zinc-400">Регламентная мера</th>
+                                    <th class="w-12 action-col hidden"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="handbook-body" class="text-zinc-200">
+                                <tr><td colspan='4' class='text-center py-6 text-zinc-500'>Если тут пусто — нажмите «Вернуть базу из регламента» 👆</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="content-1" class="col-span-12 sheet bg-zinc-900 rounded-3xl p-8">
+                    <div class="flex justify-between mb-6">
+                        <div>
+                            <h2 id="table-title" class="text-2xl font-semibold">📊 Таблица ошибок</h2>
+                            <p class="text-emerald-400 text-sm flex items-center gap-2">
+                                <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span> Синхронизация с Google Таблицами
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-12 gap-4 bg-zinc-950 border border-zinc-800 rounded-3xl p-6 mb-8 shadow-inner">
+                        <div class="col-span-3">
+                            <label class="block text-xs text-zinc-400 mb-2">Дата</label>
+                            <input id="new-date" type="date" class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl px-5 py-3 text-sm focus:border-emerald-500 outline-none">
+                        </div>
+                        <div class="col-span-3">
+                            <label class="block text-xs text-zinc-400 mb-2">Кто ошибся? (Сотрудник / РГП)</label>
+                            <select id="new-mop" class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl px-5 py-3 text-sm focus:border-emerald-500 outline-none"></select>
+                        </div>
+                        <div class="col-span-3">
+                            <label class="block text-xs text-zinc-400 mb-2">Тип ошибки</label>
+                            <select id="new-type" class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl px-5 py-3 text-sm focus:border-emerald-500 outline-none"></select>
+                        </div>
+                        <div class="col-span-3">
+                            <label class="block text-xs text-zinc-400 mb-2">Ссылка на сделку</label>
+                            <input id="new-link" type="text" placeholder="crm.ru/deal/..." class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl px-5 py-3 text-sm focus:border-emerald-500 outline-none">
+                        </div>
+
+                        <div id="assign-rgp-div" class="col-span-12 hidden mt-2 pt-4 border-t border-zinc-800">
+                            <label class="block text-xs text-zinc-400 mb-2">Присвоить ошибку отделу (РГП):</label>
+                            <select id="new-rgp" class="w-96 bg-zinc-900 border border-zinc-700 rounded-2xl px-5 py-3 text-sm focus:border-blue-500 outline-none"></select>
+                        </div>
+
+                        <div class="col-span-12 flex justify-end mt-4">
+                            <button onclick="addErrorRow()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-3.5 rounded-2xl font-medium flex items-center gap-2 transition-colors">
+                                ✅ Фиксировать ошибку
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center justify-between gap-4 bg-zinc-950 p-4 rounded-2xl border border-zinc-800 mb-4 shadow-inner">
+                        <div class="flex items-center gap-3">
+                            <div class="text-sm text-zinc-400 font-medium mr-2">Фильтр по дате:</div>
+                            <input type="date" id="filter-start" onchange="applyFilters()" class="bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:border-blue-500 outline-none text-zinc-300">
+                            <span class="text-zinc-600">—</span>
+                            <input type="date" id="filter-end" onchange="applyFilters()" class="bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:border-blue-500 outline-none text-zinc-300">
+                            <button onclick="clearFilters()" class="text-xs text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 px-3 py-2 rounded-xl transition-colors">Сбросить</button>
+                        </div>
+                        <div class="flex gap-3">
+                            <button onclick="exportToCSV()" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 transition-colors">
+                                ⬇️ Скачать лог (CSV)
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="overflow-x-auto overflow-y-auto max-h-[50vh] pr-2">
+                        <table class="w-full text-sm">
+                            <thead class="sticky top-0 bg-zinc-900 z-10">
+                                <tr class="border-b border-zinc-700">
+                                    <th class="text-left py-4 px-6 font-medium text-zinc-400">Дата</th>
+                                    <th class="text-left py-4 px-6 font-medium text-zinc-400">МОП / РГП</th>
+                                    <th class="text-left py-4 px-6 font-medium text-zinc-400">Отдел (РГП)</th>
+                                    <th class="text-left py-4 px-6 font-medium text-zinc-400">Ссылка</th>
+                                    <th class="text-left py-4 px-6 font-medium text-zinc-400">Тип ошибки</th>
+                                    <th class="text-left py-4 px-6 font-medium text-zinc-400">Критичность</th>
+                                    <th class="text-left py-4 px-6 font-medium text-zinc-400">Мера</th>
+                                    <th class="text-center py-4 px-6 font-medium text-zinc-400">Отработано</th>
+                                    <th class="text-left py-4 px-6 font-medium text-zinc-400">Комментарий</th>
+                                    <th class="w-10"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="rgp-table-body" class="mono text-xs">
+                                <tr><td colspan='10' class='text-center py-10 text-zinc-500'>Загрузка данных...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="content-2" class="col-span-12 sheet bg-zinc-900 rounded-3xl p-8 hidden">
+                    <div class="flex items-center justify-between mb-8">
+                        <div>
+                            <h2 id="dashboard-title" class="text-2xl font-semibold">📈 Аналитика</h2>
+                            <p class="text-sm text-zinc-400 mt-1">Данные отображаются с учетом фильтра дат из таблицы.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-12 gap-8">
+                        <div class="col-span-4 bg-zinc-950 rounded-3xl p-8 border border-zinc-800 flex flex-col justify-center">
+                            <div>
+                                <div class="text-zinc-400 text-sm">Всего ошибок за период</div>
+                                <div id="total-errors-count" class="text-5xl font-semibold text-zinc-200 mt-3 mono">0 шт.</div>
+                            </div>
+                        </div>
+
+                        <div class="col-span-8 bg-zinc-950 rounded-3xl p-8 border border-zinc-800 flex flex-col">
+                            <div class="text-lg font-medium mb-5 flex items-center gap-2">🔥 Частые ошибки <span class="text-xs text-zinc-500 font-normal">(сортировка по кол-ву)</span></div>
+                            <div id="error-rating-list" class="overflow-y-auto max-h-[150px] pr-3 space-y-3 custom-scrollbar flex-grow"></div>
+                        </div>
+
+                        <div class="col-span-12 bg-zinc-950 rounded-3xl p-8 border border-zinc-800 relative overflow-hidden">
+                            <div class="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 rounded-full blur-3xl -mr-10 -mt-10"></div>
+                            <div class="flex justify-between items-center mb-6 relative z-10">
+                                <div>
+                                    <div class="text-xl font-medium flex items-center gap-3">🛡️ Претенденты на премию «Железная воля»</div>
+                                    <div class="text-sm text-zinc-400 mt-1">Сотрудники без единой ошибки за выбранный период</div>
+                                </div>
+                            </div>
+                            <div id="iron-will-list" class="flex flex-wrap gap-3 relative z-10"></div>
+                        </div>
+
+                        <div class="col-span-12 bg-zinc-950 rounded-3xl p-8 border border-zinc-800">
+                            <div class="font-medium mb-6">Динамика количества ошибок</div>
+                            <div class="h-64 relative"><canvas id="dynamics-chart" class="w-full h-full"></canvas></div>
+                        </div>
+
+                        <div class="col-span-12 bg-zinc-950 rounded-3xl p-8 border border-zinc-800">
+                            <div class="font-medium mb-6">Антирейтинг сотрудников (Топ-10 по кол-ву)</div>
+                            <div class="h-72 relative"><canvas id="mop-chart" class="w-full h-full"></canvas></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="content-3" class="col-span-12 sheet bg-zinc-900 rounded-3xl p-8 hidden">
+                    <div class="mb-8">
+                        <h2 class="text-2xl font-semibold">⚙️ Управление сотрудниками</h2>
+                        <p class="text-zinc-400">РОП может менять названия отделов, добавлять и удалять МОПов.</p>
+                    </div>
+                    <div id="rgp-config-container" class="grid grid-cols-1 md:grid-cols-3 gap-8"></div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbz6qmxp_ohMmLGOz9AlBqlUc_U5if4XlTdUUxxK7kzgAfqzIQA9Jdxuqese8-VM8Q1Erw/exec';
+
+        const USERS_DB = {
+            "rop": { pass: "admin", role: "rop", name: "Гаврилов Дмитрий -" },
+            "rgp1": { pass: "111", role: "rgp1", name: "Анисович Дмитрий (РГП-1)" },
+            "rgp2": { pass: "222", role: "rgp2", name: "Козык Анстасия (РГП-2)" },
+            "rgp3": { pass: "333", role: "rgp3", name: "Каменев Роман (РГП-3)" }
+        };
+        let currentSession = null;
+
+        function attemptLogin() {
+            const u = document.getElementById('login-username').value.trim();
+            const p = document.getElementById('login-password').value.trim();
+            if (USERS_DB[u] && USERS_DB[u].pass === p) {
+                document.getElementById('login-error').classList.add('hidden');
+                currentSession = USERS_DB[u];
+                localStorage.setItem('control_oshibok_session', u);
+                startApplication();
+            } else { document.getElementById('login-error').classList.remove('hidden'); }
+        }
+
+        function checkStoredSession() {
+            const u = localStorage.getItem('control_oshibok_session');
+            if (u && USERS_DB[u]) { currentSession = USERS_DB[u]; startApplication(); }
+        }
+
+        function logout() { localStorage.removeItem('control_oshibok_session'); location.reload(); }
+
+        function startApplication() {
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('main-app').classList.remove('hidden');
+            document.getElementById('user-full-name').textContent = currentSession.name;
+            document.getElementById('user-role-display').textContent = (currentSession.role === 'rop' ? '👑 РОП' : '👔 РГП');
+            document.getElementById('new-date').value = new Date().toISOString().split('T')[0];
+            initData();
+        }
+
+        const defaultHandbook = [
+            { type: "Невыполнение плана по минутам", crit: "Легкая", measure: "Дисциплинарная беседа" },
+            { type: "Длительность первого звонка более 7 мин", crit: "Легкая", measure: "Дисциплинарная беседа" },
+            { type: "Неправильная категория/нет источника", crit: "Легкая", measure: "Дисциплинарная беседа" },
+            { type: "Просроченное дело по сделке", crit: "Легкая", measure: "Дисциплинарная беседа" },
+            { type: "Отхождение от сценария звонка", crit: "Легкая", measure: "Дисциплинарная беседа" },
+            { type: "Озвучивание цены в первом звонке", crit: "Легкая", measure: "Дисциплинарная беседа" },
+            { type: "Необработка заявки в течении 30 минут", crit: "Средняя", measure: "Дисциплинарная беседа" },
+            { type: "Провал сделки без причины", crit: "Средняя", measure: "Дисциплинарная беседа" },
+            { type: "Сделка проведена без договора", crit: "Средняя", measure: "Дисциплинарная беседа" },
+            { type: "Невыполнение задач руководителя", crit: "Средняя", measure: "Дисциплинарная беседа" },
+            { type: "Перенос задачи без выполнения действия", crit: "Средняя", measure: "Дисциплинарная беседа" },
+            { type: "Неполная информация/неверный этап", crit: "Средняя", measure: "Дисциплинарная беседа" },
+            { type: "Качественный ЛИД не переведен в сделку", crit: "Средняя", measure: "Дисциплинарная беседа" },
+            { type: "Отсутствие документа реализации (5 дней)", crit: "Средняя", measure: "Дисциплинарная беседа" },
+            { type: "Повторное замечание не устранено", crit: "Грубая", measure: "Дисциплинарная беседа" },
+            { type: "Попытка обмануть компанию", crit: "Грубая", measure: "Дисциплинарная беседа" },
+            { type: "Отгрузка без доплат/изменение договора", crit: "Грубая", measure: "Дисциплинарная беседа" }
+        ];
+
+        let rgpsConfig = {
+            "rgp1": { name: "РГП-1", managers: ["Менеджер 1-1"] },
+            "rgp2": { name: "РГП-2", managers: ["Менеджер 2-1"] },
+            "rgp3": { name: "РГП-3", managers: ["Менеджер 3-1"] }
+        };
+        let handbook = [];
+        let errorMap = {};
+        let allErrors = [];
+        
+        let mopChartInstance = null;
+        let dynamicsChartInstance = null;
+        let currentTab = 1;
+
+        function forceLoadDefaults() {
+            if(!confirm("Загрузить 17 стандартных ошибок из регламента? (Текущий справочник будет перезаписан)")) return;
+            handbook = [...defaultHandbook];
+            buildErrorMap();
+            renderHandbook();
+            populateTypeSelect();
+            saveDataToGoogle();
+            alert("✅ База ошибок успешно загружена!");
+        }
+
+        async function saveDataToGoogle() {
+            document.getElementById('save-status').classList.add('visible');
+            try {
+                await fetch(WEB_APP_URL, {
+                    method: 'POST', body: JSON.stringify({ action: "save", allErrors, handbook, rgpsConfig }),
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+                });
+            } catch (e) { console.error("Ошибка сохранения", e); }
+            setTimeout(() => document.getElementById('save-status').classList.remove('visible'), 500);
+        }
+
+        function getVisibleErrors() {
+            let data = currentSession.role === "rop" ? allErrors : allErrors.filter(e => e.rgp === currentSession.role);
+            const sStr = document.getElementById('filter-start').value, eStr = document.getElementById('filter-end').value;
+            if (sStr || eStr) {
+                data = data.filter(err => {
+                    let cleanDate = err.date.includes('T') ? err.date.split('T')[0] : err.date;
+                    if (sStr && cleanDate < sStr) return false;
+                    if (eStr && cleanDate > eStr) return false;
+                    return true;
+                });
+            }
+            return data;
+        }
+
+        function applyFilters() { 
+            renderRGPTable(); 
+            refreshDashboard(); 
+        }
+        
+        function clearFilters() { document.getElementById('filter-start').value = ''; document.getElementById('filter-end').value = ''; applyFilters(); }
+
+        function exportToCSV() {
+            const data = getVisibleErrors();
+            if (data.length === 0) { alert("Нет данных"); return; }
+            const headers = ['Дата', 'МОП', 'РГП', 'Ссылка', 'Тип ошибки', 'Критичность', 'Мера', 'Отработано', 'Комментарий'];
+            const rows = data.map(err => {
+                const rgpName = rgpsConfig[err.rgp] ? rgpsConfig[err.rgp].name : err.rgp;
+                let cleanDate = err.date.includes('T') ? err.date.split('T')[0] : err.date;
+                return [cleanDate.split('-').reverse().join('.'), `"${err.mop}"`, `"${rgpName}"`, `"${err.link}"`, `"${err.type}"`, err.crit, `"${err.measure}"`, err.fact ? 'Да' : 'Нет', `"${(err.comment || "").replace(/"/g, '""')}"`].join(';');
+            });
+            const blob = new Blob(["\uFEFF" + headers.join(';') + '\n' + rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `Ошибки_Лог_${new Date().toISOString().split('T')[0]}.csv`;
+            document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        }
+
+        function renderMopManagement() {
+            if (currentSession.role !== 'rop') return;
+            const container = document.getElementById("rgp-config-container"); container.innerHTML = "";
+            Object.keys(rgpsConfig).forEach(key => {
+                const rgp = rgpsConfig[key];
+                const card = document.createElement('div'); card.className = "bg-zinc-950 p-6 rounded-2xl border border-zinc-800 flex flex-col";
+                let managersHtml = rgp.managers.map((m, i) => `<li class="flex justify-between items-center bg-zinc-900 px-4 py-2 rounded-lg border border-zinc-800 group"><span>${m}</span><button onclick="deleteManager('${key}', ${i})" class="text-zinc-600 hover:text-red-400">🗑</button></li>`).join('');
+                if(!managersHtml) managersHtml = `<li class='text-center py-2 text-zinc-600 text-xs'>Нет сотрудников</li>`;
+                card.innerHTML = `<div class="flex items-center gap-3 mb-4 pb-4 border-b border-zinc-800"><div class="w-8 h-8 bg-zinc-800 rounded-lg flex items-center justify-center text-xs mono text-zinc-500 border border-zinc-700">${key.toUpperCase()}</div><input type="text" value="${rgp.name}" onblur="updateRgpName('${key}', this.value)" class="flex-grow bg-transparent font-semibold text-lg text-zinc-100 px-2 py-1 outline-none border border-transparent"></div><ul class="space-y-2 mb-5 flex-grow">${managersHtml}</ul><div class="flex gap-2 mt-auto pt-4 border-t border-zinc-800"><input type="text" id="add-mop-inp-${key}" placeholder="Новый менеджер" class="flex-grow text-xs bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 outline-none"><button onclick="addManager('${key}')" class="bg-emerald-600 text-white px-3 py-2 rounded-lg">+</button></div>`;
+                container.appendChild(card);
+            });
+        }
+        function updateRgpName(k, v) { if(v.trim() && rgpsConfig[k].name !== v.trim()){ rgpsConfig[k].name=v.trim(); saveCfg(); } }
+        function addManager(k) { const i=document.getElementById(`add-mop-inp-${k}`); if(i.value.trim()){ rgpsConfig[k].managers.push(i.value.trim()); saveCfg(); } }
+        function deleteManager(k, idx) { if(confirm("Удалить?")){ rgpsConfig[k].managers.splice(idx,1); saveCfg(); } }
+        function saveCfg() { renderMopManagement(); populateMopSelect(); populateRgpSelectForRop(); saveDataToGoogle(); }
+
+        function buildErrorMap() { errorMap = {}; handbook.forEach(i => errorMap[i.type] = i); }
+        function renderHandbook() {
+            const tbody = document.getElementById("handbook-body"); tbody.innerHTML = "";
+            if (handbook.length === 0) {
+                tbody.innerHTML = "<tr><td colspan='4' class='text-center py-6 text-zinc-500'>Если тут пусто — нажмите «Вернуть базу из регламента» 👆</td></tr>";
+                return;
+            }
+            handbook.forEach((item, index) => {
+                const tr = document.createElement("tr"); tr.className = "border-b border-zinc-800";
+                const critCls = item.crit === 'Грубая' ? 'bg-red-500/10 text-red-400' : item.crit === 'Средняя' ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400';
+                const actHtml = currentSession.role === 'rop' ? `<button onclick="deleteHandbookRow(${index})" class="text-zinc-600 hover:text-red-400">×</button>` : '';
+                tr.innerHTML = `<td class="py-4 px-6 font-medium">${item.type}</td><td class="py-4 px-6"><span class="px-3 py-1 text-xs rounded-full ${critCls}">${item.crit}</span></td><td class="py-4 px-6 text-zinc-400">${item.measure}</td><td class="py-4 px-6 text-right ${currentSession.role === 'rop'?'':'hidden'}">${actHtml}</td>`;
+                tbody.appendChild(tr);
+            });
+        }
+        function addHandbookRow() {
+            if (currentSession.role !== "rop") return;
+            const t = prompt("Тип ошибки:"); if(!t) return;
+            handbook.push({ type: t, crit: prompt("Критичность:", "Средняя"), measure: prompt("Мера:", "Дисциплинарная беседа") });
+            buildErrorMap(); renderHandbook(); populateTypeSelect(); saveDataToGoogle();
+        }
+        function deleteHandbookRow(idx) { if(confirm("Удалить стандарт?")){ handbook.splice(idx,1); buildErrorMap(); renderHandbook(); populateTypeSelect(); saveDataToGoogle(); } }
+
+        function populateTypeSelect() {
+            const s = document.getElementById("new-type"); s.innerHTML = `<option value="" disabled selected>Выберите тип...</option>`;
+            handbook.forEach(i => s.appendChild(new Option(i.type, i.type)));
+        }
+        function populateMopSelect() {
+            const s = document.getElementById("new-mop"); s.innerHTML = `<option value="" disabled selected>Кто ошибся?</option>`;
+            let m = [];
+            if(currentSession.role==="rop"){ 
+                Object.values(rgpsConfig).forEach(r=>m.push(...r.managers)); 
+                Object.keys(rgpsConfig).forEach(k => m.push(`[РГП] ${rgpsConfig[k].name}`));
+            } 
+            else if(rgpsConfig[currentSession.role]){ 
+                m = rgpsConfig[currentSession.role].managers; 
+                m.push(`[РГП] ${rgpsConfig[currentSession.role].name}`); 
+            }
+            [...new Set(m)].sort().forEach(x => s.appendChild(new Option(x, x)));
+        }
+        function populateRgpSelectForRop() {
+            const s = document.getElementById("new-rgp"); s.innerHTML = "";
+            Object.keys(rgpsConfig).forEach(k => s.appendChild(new Option(rgpsConfig[k].name, k)));
+        }
+
+        function addErrorRow() {
+            const d = document.getElementById("new-date").value, 
+                  m = document.getElementById("new-mop").value, 
+                  t = document.getElementById("new-type").value;
+                  
+            if(!d || !m || !t){ alert("Заполните Дату, Сотрудника и Тип!"); return; }
+            const l = (document.getElementById("new-link").value||"—").replace(/https?:\/\//,'');
+            const data = errorMap[t];
+            const rgpId = currentSession.role === "rop" ? document.getElementById("new-rgp").value : currentSession.role;
+            
+            allErrors.push({ id: Date.now(), date: d, mop: m, rgp: rgpId, link: l, type: t, crit: data.crit, measure: data.measure, fact: false, comment: "" });
+            
+            document.getElementById("new-link").value = ""; 
+            document.getElementById("new-type").value = "";
+            
+            applyFilters(); saveDataToGoogle();
+        }
+
+        function renderRGPTable() {
+            const tbody = document.getElementById("rgp-table-body"); tbody.innerHTML = "";
+            const data = getVisibleErrors();
+            if (data.length === 0) { tbody.innerHTML = `<tr><td colspan='10' class='text-center py-10 text-zinc-600'>Ошибок не найдено</td></tr>`; return; }
+
+            data.sort((a,b) => new Date(b.date) - new Date(a.date)).forEach(err => {
+                const tr = document.createElement("tr"); tr.className = "border-b border-zinc-800 hover:bg-zinc-900";
+                const c = err.crit === 'Грубая' ? 'bg-red-500/10 text-red-400' : err.crit === 'Средняя' ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400';
+                let cleanDate = err.date.includes('T') ? err.date.split('T')[0] : err.date;
+                const formattedDate = cleanDate.split('-').reverse().join('.');
+                const lnk = err.link !== "—" ? `<a href="https://${err.link}" target="_blank" class="text-blue-400">CRM🔗</a>` : "—";
+                const mopCellClass = err.mop.includes('[РГП]') ? 'text-amber-400 font-semibold' : 'text-zinc-100 font-medium';
+                
+                const deleteBtnHtml = currentSession.role === 'rop' 
+                    ? `<button onclick="delErr('${err.id}')" class="text-zinc-600 hover:text-red-500 transition-colors text-lg" title="Удалить ошибку">🗑</button>` 
+                    : '';
+
+                tr.innerHTML = `
+                    <td class="py-3 px-6 text-zinc-400">${formattedDate}</td>
+                    <td class="py-3 px-6 ${mopCellClass}">${err.mop}</td>
+                    <td class="py-3 px-6 text-zinc-500">${rgpsConfig[err.rgp]?rgpsConfig[err.rgp].name:'???'}</td>
+                    <td class="py-3 px-6">${lnk}</td>
+                    <td class="py-3 px-6">${err.type}</td>
+                    <td class="py-3 px-6"><span class="px-2 py-0.5 text-xs rounded-full ${c}">${err.crit}</span></td>
+                    <td class="py-3 px-6 text-zinc-400 text-xs">${err.measure}</td>
+                    <td class="py-3 px-6 text-center"><input type="checkbox" ${err.fact?'checked':''} onchange="toggleFact('${err.id}')" class="w-4 h-4 accent-emerald-500"></td>
+                    <td class="py-3 px-6"><input type="text" value="${err.comment||''}" onblur="updComm('${err.id}',this.value)" class="bg-transparent border border-transparent focus:border-zinc-700 w-full px-1 text-xs outline-none text-zinc-300"></td>
+                    <td class="py-3 px-6 text-right">${deleteBtnHtml}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+        function toggleFact(id) { const e=allErrors.find(x=>x.id==id); if(e){ e.fact=!e.fact; saveDataToGoogle(); } }
+        function updComm(id, v) { const e=allErrors.find(x=>x.id==id); if(e && e.comment!==v){ e.comment=v; saveDataToGoogle(); } }
+        function delErr(id) { 
+            if (currentSession.role !== 'rop') { alert("Удалять записи может только РОП!"); return; }
+            if(confirm("Удалить запись об ошибке?")){ 
+                allErrors=allErrors.filter(x=>x.id!=id); 
+                applyFilters(); 
+                saveDataToGoogle(); 
+            } 
+        }
+
+        function refreshDashboard() {
+            const data = getVisibleErrors(); 
+            
+            document.getElementById("total-errors-count").textContent = data.length + " шт.";
+
+            let allStaff = [];
+            if (currentSession.role === 'rop') {
+                Object.keys(rgpsConfig).forEach(k => {
+                    allStaff.push(...rgpsConfig[k].managers);
+                    allStaff.push(`[РГП] ${rgpsConfig[k].name}`);
+                });
+            } else {
+                const k = currentSession.role;
+                if(rgpsConfig[k]) {
+                    allStaff.push(...rgpsConfig[k].managers);
+                    allStaff.push(`[РГП] ${rgpsConfig[k].name}`);
+                }
+            }
+            allStaff = [...new Set(allStaff)];
+            const offenders = new Set(data.map(err => err.mop));
+            const contenders = allStaff.filter(name => !offenders.has(name)).sort();
+            
+            const ironWillCont = document.getElementById("iron-will-list");
+            ironWillCont.innerHTML = "";
+            if (contenders.length === 0) {
+                ironWillCont.innerHTML = "<p class='text-zinc-500 text-sm'>Никого не осталось 😢</p>";
+            } else {
+                contenders.forEach(name => {
+                    ironWillCont.innerHTML += `<div class="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>${name}</div>`;
+                });
+            }
+
+            const typeStats = {}; 
+            data.forEach(e => {
+                if(!typeStats[e.type]) typeStats[e.type] = 0;
+                typeStats[e.type] += 1;
+            });
+            
+            const ratingCont = document.getElementById("error-rating-list"); ratingCont.innerHTML = "";
+            const sortedTypes = Object.entries(typeStats).sort((a,b)=>b[1] - a[1]);
+            
+            if(sortedTypes.length === 0) {
+                ratingCont.innerHTML = "<p class='text-zinc-500 text-sm'>Нет данных</p>";
+            } else {
+                sortedTypes.forEach(([t, count], idx) => { 
+                    ratingCont.innerHTML += `
+                    <div class="flex justify-between items-center bg-zinc-900 rounded-xl px-5 py-3 border border-zinc-800 hover:bg-zinc-800 transition-colors">
+                        <div class='flex items-center gap-3'>
+                            <span class="text-zinc-500 font-bold w-4">${idx+1}.</span>
+                            <span class='text-sm text-zinc-200'>${t}</span>
+                        </div>
+                        <div class="flex items-center gap-4 text-xs">
+                            <span class="text-zinc-400 bg-zinc-950 px-3 py-1.5 rounded-md border border-zinc-800">${count} шт.</span>
+                        </div>
+                    </div>`; 
+                });
+            }
+
+            const monthlyData = {};
+            data.forEach(e => {
+                let d = e.date.includes('T') ? e.date.split('T')[0] : e.date;
+                const month = d.substring(0, 7); 
+                monthlyData[month] = (monthlyData[month] || 0) + 1;
+            });
+            const sortedMonths = Object.keys(monthlyData).sort();
+            const dynLabels = sortedMonths.map(m => m.split('-').reverse().join('.'));
+            const dynValues = sortedMonths.map(m => monthlyData[m]);
+
+            if(dynamicsChartInstance) dynamicsChartInstance.destroy();
+            dynamicsChartInstance = new Chart(document.getElementById("dynamics-chart"), {
+                type: 'line', 
+                data: { 
+                    labels: dynLabels, 
+                    datasets: [{ 
+                        label: 'Кол-во ошибок', data: dynValues, 
+                        borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', 
+                        borderWidth: 2, fill: true, tension: 0.3, pointBackgroundColor: '#3b82f6'
+                    }] 
+                },
+                options: { 
+                    responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, 
+                    scales: { y: { beginAtZero: true, grid:{color:'#27272a'}, ticks:{color:'#71717a', stepSize: 1} }, x: { grid:{display:false}, ticks:{color:'#a1a1aa'} } } 
+                }
+            });
+
+            const mc = {}; data.forEach(e => mc[e.mop] = (mc[e.mop]||0) + 1);
+            const topMc = Object.entries(mc).sort((a,b)=>b[1]-a[1]).slice(0,10);
+            if(mopChartInstance) mopChartInstance.destroy();
+            mopChartInstance = new Chart(document.getElementById("mop-chart"), {
+                type: 'bar', data: { labels: topMc.map(i=>i[0]), datasets: [{ data: topMc.map(i=>i[1]), backgroundColor: '#ef4444', borderRadius: 4 }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid:{color:'#27272a'}, ticks:{color:'#71717a', stepSize: 1} }, x: { grid:{display:false}, ticks:{color:'#a1a1aa'} } } }
+            });
+        }
+
+        function switchTab(n) {
+            if(currentSession.role!=="rop" && n!==1 && n!==2){ alert("Только для РОП"); n=1; }
+            currentTab = n;
+            for(let i=0;i<=3;i++){
+                document.getElementById(`tab-${i}`)?.classList.toggle("tab-active", i===n);
+                document.getElementById(`content-${i}`)?.classList.toggle("hidden", i!==n);
+            }
+            if(n===1) renderRGPTable();
+            if(n===2) refreshDashboard();
+            if(n===3) renderMopManagement();
+        }
+
+        function setupUi() {
+            document.getElementById('main-nav').classList.remove('hidden');
+            if(currentSession.role === "rop"){
+                document.getElementById('app-subtitle').textContent = "Режим РОП • Полный доступ";
+                document.getElementById('table-title').textContent = "📊 Все ошибки (с фильтрами)";
+                document.getElementById('dashboard-title').textContent = "📈 Аналитика по всем отделам";
+                [0,2,3].forEach(i=>document.getElementById(`tab-${i}`).classList.remove('hidden'));
+                document.querySelectorAll('.add-btn, .action-col').forEach(el=>el.classList.remove('hidden'));
+                document.getElementById('assign-rgp-div').classList.remove('hidden');
+                populateRgpSelectForRop();
+            } else {
+                document.getElementById('app-subtitle').textContent = `Вижу только отдел: ${currentSession.name}`;
+                document.getElementById('table-title').textContent = `📊 Ошибки (${currentSession.name})`;
+                document.getElementById('dashboard-title').textContent = `📈 Аналитика (${currentSession.name})`;
+                document.getElementById('tab-2').classList.remove('hidden');
+            }
+            populateTypeSelect(); populateMopSelect(); switchTab(1);
+        }
+
+        async function initData() {
+            try {
+                const res = await fetch(WEB_APP_URL);
+                const d = await res.json();
+                if(d.allErrors) allErrors = d.allErrors;
+                if(d.handbook && d.handbook.length > 0) handbook = d.handbook;
+                if(d.rgpsConfig && Object.keys(d.rgpsConfig).length>0) rgpsConfig = d.rgpsConfig;
+            } catch (e) { 
+                console.warn("Ошибка базы, использую локальные данные", e);
+            }
+            buildErrorMap(); renderHandbook(); setupUi();
+        }
+        
+        window.onload = checkStoredSession;
+    </script>
+</body>
+</html>
