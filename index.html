@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
@@ -50,7 +50,10 @@
                            onkeypress="if(event.key === 'Enter') attemptLogin()">
                 </div>
                 <div id="login-error" class="text-red-400 text-sm hidden pt-1 text-center">❌ Неверный логин или пароль</div>
-                <button onclick="attemptLogin()" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-xl font-medium mt-4 transition-colors">Войти в систему</button>
+                
+                <button id="login-btn" onclick="attemptLogin()" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-xl font-medium mt-4 transition-colors">
+                    Войти в систему
+                </button>
                 <p class="text-center text-zinc-600 text-xs pt-4">© 2026 Разработчик Гаврилов Д.А. Все права защищены.</p>
             </div>
         </div>
@@ -259,33 +262,78 @@
     </div>
 
     <script>
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbz6qmxp_ohMmLGOz9AlBqlUc_U5if4XlTdUUxxK7kzgAfqzIQA9Jdxuqese8-VM8Q1Erw/exec';
+        // ВАЖНО: ВСТАВЬТЕ СЮДА ВАШУ НОВУЮ ССЫЛКУ!
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycby5UzNqrtJnx2uRGH7jrJLl-1_3rGONDMIr6HobGHkjoQl3BTGTRZObt5yDWuk8jZsx/exec';
 
-        const USERS_DB = {
-            "rop": { pass: "admin", role: "rop", name: "Гаврилов Дмитрий -" },
-            "rgp1": { pass: "111", role: "rgp1", name: "Анисович Дмитрий (РГП-1)" },
-            "rgp2": { pass: "222", role: "rgp2", name: "Козык Анстасия (РГП-2)" },
-            "rgp3": { pass: "333", role: "rgp3", name: "Каменев Роман (РГП-3)" }
-        };
         let currentSession = null;
 
-        function attemptLogin() {
+        // ПАРОЛИ УДАЛЕНЫ! Теперь они хранятся и проверяются на сервере Google Apps Script
+        async function attemptLogin() {
             const u = document.getElementById('login-username').value.trim();
             const p = document.getElementById('login-password').value.trim();
-            if (USERS_DB[u] && USERS_DB[u].pass === p) {
-                document.getElementById('login-error').classList.add('hidden');
-                currentSession = USERS_DB[u];
-                localStorage.setItem('control_oshibok_session', u);
-                startApplication();
-            } else { document.getElementById('login-error').classList.remove('hidden'); }
+            const btn = document.getElementById('login-btn');
+            const errorMsg = document.getElementById('login-error');
+            
+            if(!u || !p) {
+                errorMsg.textContent = "❌ Введите логин и пароль";
+                errorMsg.classList.remove('hidden');
+                return;
+            }
+
+            btn.textContent = "Проверка данных...";
+            btn.disabled = true;
+            errorMsg.classList.add('hidden');
+
+            try {
+                // Отправляем логин и пароль на сервер для защищенной проверки
+                const res = await fetch(WEB_APP_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({ action: "login", username: u, password: p }),
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+                });
+                const data = await res.json();
+                
+                if (data.status === "ok") {
+                    currentSession = data.user;
+                    // Сохраняем защищенный токен, чтобы не логиниться при перезагрузке страницы
+                    localStorage.setItem('control_oshibok_token', btoa(u + ':' + p));
+                    startApplication();
+                } else {
+                    errorMsg.textContent = "❌ " + (data.message || "Неверный логин или пароль");
+                    errorMsg.classList.remove('hidden');
+                    btn.textContent = "Войти в систему";
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                errorMsg.textContent = "❌ Ошибка связи с сервером";
+                errorMsg.classList.remove('hidden');
+                btn.textContent = "Войти в систему";
+                btn.disabled = false;
+            }
         }
 
-        function checkStoredSession() {
-            const u = localStorage.getItem('control_oshibok_session');
-            if (u && USERS_DB[u]) { currentSession = USERS_DB[u]; startApplication(); }
+        async function checkStoredSession() {
+            const token = localStorage.getItem('control_oshibok_token');
+            if (token) {
+                try {
+                    const [u, p] = atob(token).split(':');
+                    const res = await fetch(WEB_APP_URL, {
+                        method: 'POST',
+                        body: JSON.stringify({ action: "login", username: u, password: p }),
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+                    });
+                    const data = await res.json();
+                    if (data.status === "ok") {
+                        currentSession = data.user;
+                        startApplication();
+                        return;
+                    }
+                } catch(e) { console.error("Ошибка автовхода", e); }
+            }
+            // Если токена нет или пароль сменили на сервере - юзер останется на экране входа
         }
 
-        function logout() { localStorage.removeItem('control_oshibok_session'); location.reload(); }
+        function logout() { localStorage.removeItem('control_oshibok_token'); location.reload(); }
 
         function startApplication() {
             document.getElementById('login-screen').style.display = 'none';
@@ -316,11 +364,7 @@
             { type: "Отгрузка без доплат/изменение договора", crit: "Грубая", measure: "Дисциплинарная беседа" }
         ];
 
-        let rgpsConfig = {
-            "rgp1": { name: "РГП-1", managers: ["Менеджер 1-1"] },
-            "rgp2": { name: "РГП-2", managers: ["Менеджер 2-1"] },
-            "rgp3": { name: "РГП-3", managers: ["Менеджер 3-1"] }
-        };
+        let rgpsConfig = {};
         let handbook = [];
         let errorMap = {};
         let allErrors = [];
@@ -433,10 +477,12 @@
             const s = document.getElementById("new-mop"); s.innerHTML = `<option value="" disabled selected>Кто ошибся?</option>`;
             let m = [];
             if(currentSession.role==="rop"){ 
-                Object.values(rgpsConfig).forEach(r=>m.push(...r.managers)); 
-                Object.keys(rgpsConfig).forEach(k => m.push(`[РГП] ${rgpsConfig[k].name}`));
+                if(rgpsConfig) {
+                    Object.values(rgpsConfig).forEach(r=>m.push(...r.managers)); 
+                    Object.keys(rgpsConfig).forEach(k => m.push(`[РГП] ${rgpsConfig[k].name}`));
+                }
             } 
-            else if(rgpsConfig[currentSession.role]){ 
+            else if(rgpsConfig && rgpsConfig[currentSession.role]){ 
                 m = rgpsConfig[currentSession.role].managers; 
                 m.push(`[РГП] ${rgpsConfig[currentSession.role].name}`); 
             }
@@ -444,7 +490,9 @@
         }
         function populateRgpSelectForRop() {
             const s = document.getElementById("new-rgp"); s.innerHTML = "";
-            Object.keys(rgpsConfig).forEach(k => s.appendChild(new Option(rgpsConfig[k].name, k)));
+            if(rgpsConfig) {
+                Object.keys(rgpsConfig).forEach(k => s.appendChild(new Option(rgpsConfig[k].name, k)));
+            }
         }
 
         function addErrorRow() {
@@ -485,7 +533,7 @@
                 tr.innerHTML = `
                     <td class="py-3 px-6 text-zinc-400">${formattedDate}</td>
                     <td class="py-3 px-6 ${mopCellClass}">${err.mop}</td>
-                    <td class="py-3 px-6 text-zinc-500">${rgpsConfig[err.rgp]?rgpsConfig[err.rgp].name:'???'}</td>
+                    <td class="py-3 px-6 text-zinc-500">${(rgpsConfig && rgpsConfig[err.rgp])?rgpsConfig[err.rgp].name:'???'}</td>
                     <td class="py-3 px-6">${lnk}</td>
                     <td class="py-3 px-6">${err.type}</td>
                     <td class="py-3 px-6"><span class="px-2 py-0.5 text-xs rounded-full ${c}">${err.crit}</span></td>
@@ -514,16 +562,18 @@
             document.getElementById("total-errors-count").textContent = data.length + " шт.";
 
             let allStaff = [];
-            if (currentSession.role === 'rop') {
-                Object.keys(rgpsConfig).forEach(k => {
-                    allStaff.push(...rgpsConfig[k].managers);
-                    allStaff.push(`[РГП] ${rgpsConfig[k].name}`);
-                });
-            } else {
-                const k = currentSession.role;
-                if(rgpsConfig[k]) {
-                    allStaff.push(...rgpsConfig[k].managers);
-                    allStaff.push(`[РГП] ${rgpsConfig[k].name}`);
+            if(rgpsConfig) {
+                if (currentSession.role === 'rop') {
+                    Object.keys(rgpsConfig).forEach(k => {
+                        allStaff.push(...rgpsConfig[k].managers);
+                        allStaff.push(`[РГП] ${rgpsConfig[k].name}`);
+                    });
+                } else {
+                    const k = currentSession.role;
+                    if(rgpsConfig[k]) {
+                        allStaff.push(...rgpsConfig[k].managers);
+                        allStaff.push(`[РГП] ${rgpsConfig[k].name}`);
+                    }
                 }
             }
             allStaff = [...new Set(allStaff)];
@@ -639,7 +689,17 @@
                 const d = await res.json();
                 if(d.allErrors) allErrors = d.allErrors;
                 if(d.handbook && d.handbook.length > 0) handbook = d.handbook;
-                if(d.rgpsConfig && Object.keys(d.rgpsConfig).length>0) rgpsConfig = d.rgpsConfig;
+                
+                // Исправление: если rgpsConfig пустой, задаем базовый, чтобы страница не ломалась
+                if(d.rgpsConfig && Object.keys(d.rgpsConfig).length>0) {
+                    rgpsConfig = d.rgpsConfig;
+                } else {
+                    rgpsConfig = {
+                        "rgp1": { name: "РГП-1", managers: [] },
+                        "rgp2": { name: "РГП-2", managers: [] },
+                        "rgp3": { name: "РГП-3", managers: [] }
+                    };
+                }
             } catch (e) { 
                 console.warn("Ошибка базы, использую локальные данные", e);
             }
